@@ -1,0 +1,837 @@
+{
+  "name": "SEO Blog Automation - Complete Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "id": "e8527af0-7a4d-4612-8be6-e7fc2f2b690d",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -4176,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "readRows",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_DOCUMENT_ID",
+          "mode": "list",
+          "cachedResultName": "SEO Keywords Master"
+        }
+      },
+      "id": "89e627aa-1f1e-4466-99b3-3dea58136081",
+      "name": "Google Sheets - Read Keywords",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        -3968,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "filter-1",
+              "leftValue": "={{ $json.Status }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "ad2cbcd3-6af8-402e-89b6-35653a6bfb85",
+      "name": "Filter - Unprocessed Only",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        -3744,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-1",
+              "name": "primaryKeyword",
+              "value": "={{ $json['Primary Keyword'].trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-2",
+              "name": "brandName",
+              "value": "={{ $json['Brand Name'].trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-3",
+              "name": "websiteUrl",
+              "value": "={{ $json['Website URL'].trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-4",
+              "name": "sheetRowId",
+              "value": "={{ $json.row_number }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5bbc37b2-4aee-4644-9ce0-4a82222a0b3f",
+      "name": "Set Variables",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -3520,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_suggestions/live",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=[\n  {\n    \"keyword\": \"{{ $json.primaryKeyword }}\",\n    \"location_name\": \"United States\",\n    \"language_name\": \"English\",\n    \"include_serp_info\": true,\n    \"include_seed_keyword\": true,\n    \"limit\": 100\n  }\n]",
+        "options": {}
+      },
+      "id": "798c4122-e6ec-4b80-adcd-4ed1e479feb1",
+      "name": "DataForSEO - Keyword Research",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3296,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const primaryKeyword = $input.first().json.primaryKeyword;\nconst brandName = $input.first().json.brandName;\nconst websiteUrl = $input.first().json.websiteUrl;\nconst sheetRowId = $input.first().json.sheetRowId;\n\n// Parse DataForSEO response\nconst response = $input.first().json;\nconst tasks = response.tasks || [];\n\nif (tasks.length === 0 || !tasks[0].result || tasks[0].result.length === 0) {\n  throw new Error('No results from DataForSEO API');\n}\n\nconst result = tasks[0].result[0];\nconst items = result.items || [];\n\nconst secondaryKeywords = [];\nconst lsiKeywords = [];\n\nfor (const item of items) {\n  const keywordData = item.keyword_data;\n  if (!keywordData) continue;\n  \n  const keyword = keywordData.keyword;\n  const searchVolume = keywordData.keyword_info?.search_volume || 0;\n  \n  // Get keyword difficulty from serp_info\n  const keywordDifficulty = keywordData.keyword_properties?.keyword_difficulty || 0;\n  \n  // Apply filters: KD < 30 AND Volume > 1000\n  if (keywordDifficulty >= 30 || searchVolume < 1000) {\n    continue;\n  }\n  \n  // Categorize keywords\n  // Secondary: contains primary keyword\n  // LSI: related but doesn't contain primary keyword\n  if (keyword.toLowerCase().includes(primaryKeyword.toLowerCase())) {\n    secondaryKeywords.push({\n      keyword: keyword,\n      volume: searchVolume,\n      kd: keywordDifficulty\n    });\n  } else {\n    lsiKeywords.push({\n      keyword: keyword,\n      volume: searchVolume,\n      kd: keywordDifficulty\n    });\n  }\n}\n\n// Sort by volume (descending) and limit to top 10 each\nconst topSecondary = secondaryKeywords\n  .sort((a, b) => b.volume - a.volume)\n  .slice(0, 10);\n  \nconst topLSI = lsiKeywords\n  .sort((a, b) => b.volume - a.volume)\n  .slice(0, 10);\n\nreturn {\n  primaryKeyword: primaryKeyword,\n  brandName: brandName,\n  websiteUrl: websiteUrl,\n  sheetRowId: sheetRowId,\n  secondaryKeywords: topSecondary,\n  lsiKeywords: topLSI,\n  totalSecondary: topSecondary.length,\n  totalLSI: topLSI.length,\n  researchDate: new Date().toISOString()\n};"
+      },
+      "id": "250b92dc-a9a4-436b-aaa2-773f48ee0b00",
+      "name": "Code - Parse Keywords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3088,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "table": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "Keywords_Database"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "61c9e7c0-729e-4a16-b1f8-e0a83f7e555d",
+      "name": "Airtable - Store Keywords",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        -2864,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const primaryKeyword = $input.first().json.primaryKeyword;\nconst brandName = $input.first().json.brandName;\nconst websiteUrl = $input.first().json.websiteUrl;\nconst secondaryKeywords = $input.first().json.secondaryKeywords.map(k => k.keyword);\nconst lsiKeywords = $input.first().json.lsiKeywords.map(k => k.keyword);\n\nconst prompt = `You are an expert SEO content writer with 10+ years of experience. You write content that ranks #1 on Google while being genuinely helpful to readers.\n\nCRITICAL TASK: Write a complete, SEO-optimized blog article following EVERY requirement below with precision.\n\n═══════════════════════════════════════════════════════\nPRIMARY KEYWORD REQUIREMENTS\n═══════════════════════════════════════════════════════\n\nPRIMARY KEYWORD: \"${primaryKeyword}\"\n\nThis keyword MUST appear EXACTLY 12 times in the article:\n✓ Meta Title (1 time)\n✓ Meta Description (1 time)\n✓ First paragraph - within first 10% of content (1 time)\n✓ H2 Headings (minimum 1 time)\n✓ Body content (5 times naturally distributed)\n✓ Image ALT text (1 time)\n✓ Conclusion (1 time)\n✓ Table of Contents (1 time)\n\nSECONDARY KEYWORDS (use ALL naturally): ${secondaryKeywords.join(', ')}\n\nLSI KEYWORDS (use ALL naturally): ${lsiKeywords.join(', ')}\n\n═══════════════════════════════════════════════════════\nBRAND INFORMATION\n═══════════════════════════════════════════════════════\n\nBRAND NAME: \"${brandName}\"\nWEBSITE: ${websiteUrl}\n\n⚠️ CRITICAL: Use brand name ONLY ONCE in entire article (naturally in body content).\n\n═══════════════════════════════════════════════════════\nCONTENT LENGTH & STRUCTURE\n═══════════════════════════════════════════════════════\n\nTARGET: 1500 words (±50 words acceptable)\n\nREQUIRED STRUCTURE:\n1. Meta Title\n2. Meta Description\n3. Table of Contents\n4. Introduction (10% of content, ~150 words)\n5. Main Body (75% of content, ~1125 words with H2/H3 structure)\n6. FAQs Section (5 questions)\n7. Conclusion (10% of content, ~150 words)\n\n═══════════════════════════════════════════════════════\nMETA DATA RULES\n═══════════════════════════════════════════════════════\n\nMETA TITLE:\n- Length: 50-55 characters (STRICT)\n- MUST start with a power word: Ultimate, Proven, Expert, Complete, Best, Essential, Trusted, Fast, Easy\n- MUST include primary keyword\n- Format: [Power Word] [Primary Keyword] [Benefit/Hook]\n\nMETA DESCRIPTION:\n- Length: 150-155 characters (STRICT)\n- MUST include primary keyword\n- Must include a call-to-action\n- Must convey clear value proposition\n\n═══════════════════════════════════════════════════════\nHEADINGS STRUCTURE (CRITICAL)\n═══════════════════════════════════════════════════════\n\nH1: Use the Meta Title\n\nH2 HEADINGS (5-7 headings):\n⚠️ ALL H2 headings MUST be in QUESTION FORM\n⚠️ FIRST H2 MUST be \"What Is ${primaryKeyword}?\" with direct answer immediately below\n\nUNDER EACH H2:\n- Provide a DIRECT, CLEAR answer in first paragraph (2-3 sentences)\n- Then expand with details, examples, bullet points\n\nH3 HEADINGS (10-15 subheadings):\n- Support and break down H2 sections\n- Use NLP-friendly phrasing\n\n═══════════════════════════════════════════════════════\nCONTENT QUALITY REQUIREMENTS (E-E-A-T)\n═══════════════════════════════════════════════════════\n\nEXPERIENCE: Include real-world scenarios and practical insights\nEXPERTISE: Use expert terminology correctly, explain concepts simply\nAUTHORITY: Reference industry standards, use confident tone\nTRUST: Provide accurate, verifiable information\n\n═══════════════════════════════════════════════════════\nWRITING STYLE (HUMAN-LIKE, NOT AI-DETECTABLE)\n═══════════════════════════════════════════════════════\n\nDO:\n✓ Write conversationally (use \"you\", \"we\", \"I\")\n✓ Mix sentence lengths (short punchy + longer explanatory)\n✓ Use contractions (you'll, don't, here's)\n✓ Ask rhetorical questions\n✓ Vary paragraph lengths (1-5 sentences)\n✓ Use bullet points for lists\n✓ Add specific examples and numbers\n✓ Use active voice (90%+ of sentences)\n\nDON'T:\n✗ Use robotic phrases like \"delve into\", \"landscape\", \"realm\"\n✗ Start paragraphs with \"In conclusion...\", \"It's important to note...\"\n✗ Write in perfect academic tone\n✗ Create walls of text\n\n═══════════════════════════════════════════════════════\nIMAGE PLACEHOLDERS\n═══════════════════════════════════════════════════════\n\nInclude 2 image placeholders:\n\nIMAGE 1: After introduction, before first main H2\nFormat:\n[IMAGE_1_PLACEHOLDER]\nIMAGE_1_ALT: \"${primaryKeyword} [descriptive context]\"\nIMAGE_1_PROMPT: \"[Detailed prompt for image generation - professional, modern, clean style]\"\n\nIMAGE 2: Middle of article (after 3rd H2)\nFormat:\n[IMAGE_2_PLACEHOLDER]\nIMAGE_2_ALT: \"[Secondary keyword] [descriptive context including ${primaryKeyword}]\"\nIMAGE_2_PROMPT: \"[Detailed prompt for image generation]\"\n\n═══════════════════════════════════════════════════════\nTABLE OF CONTENTS (REQUIRED)\n═══════════════════════════════════════════════════════\n\nCreate clickable TOC after meta description, before introduction:\n\n## Table of Contents\n1. [H2 Heading Text]\n2. [H2 Heading Text]\n...\nFAQs\nConclusion\n\n═══════════════════════════════════════════════════════\nFAQs SECTION (REQUIRED)\n═══════════════════════════════════════════════════════\n\nCreate 5 FAQs based on what people actually search:\n\n## Frequently Asked Questions\n\n### 1. [Question using primary or secondary keyword]?\n[Clear, concise answer 2-4 sentences]\n\n[Continue for 5 total FAQs]\n\n═══════════════════════════════════════════════════════\nCONCLUSION (REQUIRED)\n═══════════════════════════════════════════════════════\n\n## Conclusion\n\nMUST INCLUDE:\n✓ Summary of key points (2-3 sentences)\n✓ Primary keyword (natural use, 1 time)\n✓ Call-to-action encouraging next steps\n✓ Reinforce main benefit/value\n\nLENGTH: 150-200 words\n\n═══════════════════════════════════════════════════════\nSEO OPTIMIZATION CHECKLIST\n═══════════════════════════════════════════════════════\n\nEnsure:\n✓ Primary keyword: 12 times (exact count)\n✓ ALL secondary keywords used naturally\n✓ ALL LSI keywords used naturally\n✓ Keyword in first 100 words\n✓ Keyword in last 100 words\n✓ Short paragraphs (3-5 sentences max)\n✓ Bullet points for scanability\n✓ No keyword stuffing\n✓ Power words throughout\n\n═══════════════════════════════════════════════════════\nOUTPUT FORMAT (FOLLOW EXACTLY)\n═══════════════════════════════════════════════════════\n\n---META_TITLE_START---\n[Your meta title here - 50-55 chars]\n---META_TITLE_END---\n\n---META_DESCRIPTION_START---\n[Your meta description here - 150-155 chars]\n---META_DESCRIPTION_END---\n\n---CONTENT_START---\n\n# [H1 Title]\n\n## Table of Contents\n[TOC]\n\n[Introduction]\n\n[IMAGE_1_PLACEHOLDER]\nIMAGE_1_ALT: [alt text]\nIMAGE_1_PROMPT: [prompt]\n\n## What Is ${primaryKeyword}?\n\n[Direct answer]\n\n[Expanded content]\n\n[Continue with remaining H2s and H3s]\n\n[IMAGE_2_PLACEHOLDER]\nIMAGE_2_ALT: [alt text]\nIMAGE_2_PROMPT: [prompt]\n\n## Frequently Asked Questions\n\n[5 FAQs]\n\n## Conclusion\n\n[Conclusion with keyword and CTA]\n\n---CONTENT_END---\n\nBEGIN WRITING NOW:`;\n\nreturn {\n  ...($input.first().json),\n  geminiPrompt: prompt\n};"
+      },
+      "id": "c59743b0-4a67-48c4-9cf0-586653c3d550",
+      "name": "Code - Build Gemini Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2640,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "YOUR_GEMINI_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": {{ JSON.stringify($json.geminiPrompt) }}\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.7,\n    \"topK\": 40,\n    \"topP\": 0.95,\n    \"maxOutputTokens\": 8192\n  }\n}",
+        "options": {}
+      },
+      "id": "15398940-9974-4ba6-bb2b-5d40b3b1786f",
+      "name": "Gemini - Generate Blog",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2416,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const geminiResponse = $input.first().json.candidates[0].content.parts[0].text;\n\n// Extract meta title\nconst metaTitleMatch = geminiResponse.match(/---META_TITLE_START---([\\s\\S]*?)---META_TITLE_END---/);\nconst metaTitle = metaTitleMatch ? metaTitleMatch[1].trim() : '';\n\n// Extract meta description\nconst metaDescMatch = geminiResponse.match(/---META_DESCRIPTION_START---([\\s\\S]*?)---META_DESCRIPTION_END---/);\nconst metaDescription = metaDescMatch ? metaDescMatch[1].trim() : '';\n\n// Extract main content\nconst contentMatch = geminiResponse.match(/---CONTENT_START---([\\s\\S]*?)---CONTENT_END---/);\nconst fullContent = contentMatch ? contentMatch[1].trim() : geminiResponse;\n\n// Extract image info\nconst image1Match = fullContent.match(/IMAGE_1_ALT:\\s*(.+)\\nIMAGE_1_PROMPT:\\s*(.+)/);\nconst image2Match = fullContent.match(/IMAGE_2_ALT:\\s*(.+)\\nIMAGE_2_PROMPT:\\s*(.+)/);\n\nconst image1Alt = image1Match ? image1Match[1].trim() : '';\nconst image1Prompt = image1Match ? image1Match[2].trim() : '';\nconst image2Alt = image2Match ? image2Match[1].trim() : '';\nconst image2Prompt = image2Match ? image2Match[2].trim() : '';\n\nlet contentWithoutPlaceholders = fullContent;\n\nreturn {\n  ...($input.first().json),\n  metaTitle: metaTitle,\n  metaDescription: metaDescription,\n  fullContent: fullContent,\n  contentWithoutPlaceholders: contentWithoutPlaceholders,\n  image1Alt: image1Alt,\n  image1Prompt: image1Prompt,\n  image2Alt: image2Alt,\n  image2Prompt: image2Prompt,\n  generatedAt: new Date().toISOString()\n};"
+      },
+      "id": "e2945a60-be1a-43be-a604-e45f8e06265a",
+      "name": "Code - Parse Gemini Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2208,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/images/generations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"dall-e-3\",\n  \"prompt\": \"{{ $json.image1Prompt }}. Professional, clean, modern style. High quality, suitable for blog article.\",\n  \"n\": 1,\n  \"size\": \"1024x1024\",\n  \"quality\": \"standard\"\n}",
+        "options": {}
+      },
+      "id": "470b065b-755d-4dfd-af90-5922c85428cf",
+      "name": "DALL-E - Generate Image 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1984,
+        96
+      ],
+      "notes": "Alternative: Use Unsplash API for free stock photos"
+    },
+    {
+      "parameters": {
+        "jsCode": "const image1Url = $input.first().json.data[0].url;\n\nreturn {\n  ...($input.first().json),\n  image1Url: image1Url\n};"
+      },
+      "id": "0a0ca147-ae21-4587-a11c-67c6333c3811",
+      "name": "Code - Save Image 1 URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1760,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/images/generations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"dall-e-3\",\n  \"prompt\": \"{{ $json.image2Prompt }}. Professional, clean, modern style. High quality, suitable for blog article.\",\n  \"n\": 1,\n  \"size\": \"1024x1024\",\n  \"quality\": \"standard\"\n}",
+        "options": {}
+      },
+      "id": "0aeb5bbf-4a7e-4421-a917-ca5b32e87515",
+      "name": "DALL-E - Generate Image 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1536,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const image2Url = $input.first().json.data[0].url;\nlet finalContent = $input.first().json.contentWithoutPlaceholders;\n\n// Create HTML for images\nconst image1Html = `<img src=\"${$input.first().json.image1Url}\" alt=\"${$input.first().json.image1Alt}\" style=\"width:100%; max-width:800px; height:auto; margin:20px 0;\" />`;\n\nconst image2Html = `<img src=\"${image2Url}\" alt=\"${$input.first().json.image2Alt}\" style=\"width:100%; max-width:800px; height:auto; margin:20px 0;\" />`;\n\n// Replace placeholders\nfinalContent = finalContent.replace('[IMAGE_1_PLACEHOLDER]', image1Html);\nfinalContent = finalContent.replace('[IMAGE_2_PLACEHOLDER]', image2Html);\n\n// Remove IMAGE_X_ALT and IMAGE_X_PROMPT lines\nfinalContent = finalContent.replace(/IMAGE_\\d_ALT:.*\\n/g, '');\nfinalContent = finalContent.replace(/IMAGE_\\d_PROMPT:.*\\n/g, '');\n\nreturn {\n  ...($input.first().json),\n  image2Url: image2Url,\n  finalContent: finalContent,\n  readyForApproval: true\n};"
+      },
+      "id": "d8f433e4-1dc5-4c85-9a8c-3e633ff30ffd",
+      "name": "Code - Insert Images into Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1328,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "table": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "Keywords_Database"
+        },
+        "options": {}
+      },
+      "id": "d0a10781-5065-42dc-8469-a97c2702cbc3",
+      "name": "Airtable - Update with Content",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        -1104,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const primaryKeyword = $input.first().json.primaryKeyword;\nconst brandName = $input.first().json.brandName;\nconst secondaryKeywords = $input.first().json.secondaryKeywords.map(k => k.keyword);\nconst lsiKeywords = $input.first().json.lsiKeywords.map(k => k.keyword);\nconst metaTitle = $input.first().json.metaTitle;\nconst metaDescription = $input.first().json.metaDescription;\nconst finalContent = $input.first().json.finalContent;\nconst websiteUrl = $input.first().json.websiteUrl;\n\n// Convert markdown to HTML (simple version)\nlet contentHtml = finalContent\n  .replace(/^# (.+)$/gm, '<h1>$1</h1>')\n  .replace(/^## (.+)$/gm, '<h2>$1</h2>')\n  .replace(/^### (.+)$/gm, '<h3>$1</h3>')\n  .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')\n  .replace(/\\*(.+?)\\*/g, '<em>$1</em>')\n  .replace(/\\n/g, '<br>');\n\n// Truncate for email preview\ncontentHtml = contentHtml.substring(0, 2000);\n\nconst keywordSummary = `\n<div style=\"background:#f5f5f5; padding:20px; border-radius:8px; margin:20px 0;\">\n  <h3>Keywords Used in This Article:</h3>\n  <p><strong>Primary Keyword:</strong> ${primaryKeyword} (Used 12 times)</p>\n  <p><strong>Secondary Keywords (${secondaryKeywords.length}):</strong><br>${secondaryKeywords.join(', ')}</p>\n  <p><strong>LSI Keywords (${lsiKeywords.length}):</strong><br>${lsiKeywords.join(', ')}</p>\n</div>\n`;\n\nconst emailHtml = `\n<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }\n    .header { background: #4CAF50; color: white; padding: 20px; border-radius: 8px; margin-bottom: 30px; }\n    .content-preview { background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin: 20px 0; }\n    .meta-info { background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 15px 0; }\n    .approval-buttons { text-align: center; margin: 30px 0; }\n    .btn { display: inline-block; padding: 15px 30px; margin: 10px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px; }\n    .btn-approve { background: #4CAF50; color: white; }\n    .btn-reject { background: #f44336; color: white; }\n    .stats { display: flex; justify-content: space-around; margin: 20px 0; }\n    .stat-box { text-align: center; padding: 15px; background: #f9f9f9; border-radius: 8px; }\n    img { max-width: 100%; height: auto; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>🎯 New Blog Ready for Approval</h1>\n    <p>Generated: ${new Date().toLocaleString()}</p>\n  </div>\n  <div class=\"meta-info\">\n    <h2>📊 Article Metadata</h2>\n    <p><strong>Target Website:</strong> ${websiteUrl}</p>\n    <p><strong>Brand:</strong> ${brandName}</p>\n    <p><strong>Meta Title (${metaTitle.length} chars):</strong> ${metaTitle}</p>\n    <p><strong>Meta Description (${metaDescription.length} chars):</strong> ${metaDescription}</p>\n  </div>\n  <div class=\"stats\">\n    <div class=\"stat-box\"><h3>${finalContent.split(' ').length}</h3><p>Words</p></div>\n    <div class=\"stat-box\"><h3>${secondaryKeywords.length + lsiKeywords.length}</h3><p>Keywords</p></div>\n    <div class=\"stat-box\"><h3>2</h3><p>Images</p></div>\n  </div>\n  ${keywordSummary}\n  <div class=\"content-preview\">\n    <h2>📝 Content Preview:</h2>\n    ${contentHtml}...\n    <p><em>[Content truncated for email. Full article in Airtable.]</em></p>\n  </div>\n  <div class=\"approval-buttons\">\n    <h2>Review Complete?</h2>\n    <p>Click a button below:</p>\n    <a href=\"YOUR_N8N_WEBHOOK_URL?action=approve&keyword=${encodeURIComponent(primaryKeyword)}\" class=\"btn btn-approve\">✅ APPROVE & PUBLISH</a>\n    <a href=\"YOUR_N8N_WEBHOOK_URL?action=reject&keyword=${encodeURIComponent(primaryKeyword)}\" class=\"btn btn-reject\">❌ REJECT</a>\n  </div>\n  <div style=\"margin-top:40px; padding:20px; background:#fff3cd; border-radius:8px;\">\n    <h3>⚡ What happens next?</h3>\n    <ul>\n      <li><strong>If you APPROVE:</strong> Article published to WordPress automatically.</li>\n      <li><strong>If you REJECT:</strong> Article marked for revision.</li>\n    </ul>\n  </div>\n</body>\n</html>\n`;\n\nreturn {\n  ...($input.first().json),\n  approvalEmailHtml: emailHtml,\n  approvalEmailSubject: `[SEO] Blog Ready: \"${metaTitle}\" - Approval Needed`\n};"
+      },
+      "id": "a3fcd2bb-063f-4a94-8c18-c7c4c8cb78a1",
+      "name": "Code - Prepare Approval Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_TEAM_EMAIL@company.com",
+        "subject": "={{ $json.approvalEmailSubject }}",
+        "message": "={{ $json.approvalEmailHtml }}",
+        "options": {}
+      },
+      "id": "faee6be2-3333-4744-8791-058a01072db5",
+      "name": "Gmail - Send Approval Request",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -656,
+        96
+      ],
+      "webhookId": "83dbb300-1438-4945-a641-8c3853dbcf80"
+    },
+    {
+      "parameters": {
+        "path": "seo-approval",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "540f50ba-c61b-4700-b78e-c13c66da4386",
+      "name": "Webhook - Wait for Approval",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        96
+      ],
+      "webhookId": "your-unique-webhook-id"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition-1",
+              "leftValue": "={{ $json.query.action }}",
+              "rightValue": "approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7cb5fc58-cade-4816-ad9e-69898f190725",
+      "name": "IF - Check Approval",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "table": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "Keywords_Database"
+        },
+        "filterByFormula": "={Primary_Keyword} = \"{{ $json.query.keyword }}\"",
+        "options": {}
+      },
+      "id": "e6816c82-3ec5-4b8d-b8f2-c564101e9c7d",
+      "name": "Airtable - Get Article Data",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "title": "={{ $json.Meta_Title }}",
+        "additionalFields": {
+          "status": "publish"
+        }
+      },
+      "id": "6bfe372a-866b-4477-809f-e880ed4f4ed2",
+      "name": "WordPress - Create Post",
+      "type": "n8n-nodes-base.wordpress",
+      "typeVersion": 1,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "table": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "Keywords_Database"
+        },
+        "options": {}
+      },
+      "id": "6e48145e-d097-42c9-92ee-415ad9fc2b11",
+      "name": "Airtable - Mark Published",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_DOCUMENT_ID",
+          "mode": "list",
+          "cachedResultName": "SEO Keywords Master"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "list",
+          "cachedResultName": "Sheet1"
+        },
+        "options": {}
+      },
+      "id": "98b70254-836a-49b7-bfcf-8cf1d89c5187",
+      "name": "Google Sheets - Update Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_TEAM_EMAIL@company.com",
+        "subject": "✅ Blog Published: {{ $json.Meta_Title }}",
+        "message": "<h2>Great news!</h2><p>The blog has been published to WordPress.</p><p><strong>WordPress URL:</strong> {{ $json.link }}</p><p><strong>Published:</strong> {{ new Date().toLocaleString() }}</p>",
+        "options": {}
+      },
+      "id": "6819f001-0085-47cb-85b2-760bf9e85242",
+      "name": "Gmail - Success Notification",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        880,
+        0
+      ],
+      "webhookId": "cdfe9866-3147-4da5-acf3-29cc74fa42fe"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "table": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "Keywords_Database"
+        },
+        "options": {}
+      },
+      "id": "e0fce39d-eacb-451d-b11d-382e74559036",
+      "name": "Airtable - Mark Rejected",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_TEAM_EMAIL@company.com",
+        "subject": "❌ Blog Rejected: {{ $json.query.keyword }}",
+        "message": "<h2>Blog Article Rejected</h2><p>The blog for <strong>{{ $json.query.keyword }}</strong> has been rejected.</p><p>The article is marked for revision in Airtable.</p>",
+        "options": {}
+      },
+      "id": "3f5bad6f-dad8-43a1-8946-a5ab0f373cfb",
+      "name": "Gmail - Rejection Notice",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        224,
+        192
+      ],
+      "webhookId": "fabbdabb-5012-4e51-b89b-97553e8acc92"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Read Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Read Keywords": {
+      "main": [
+        [
+          {
+            "node": "Filter - Unprocessed Only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter - Unprocessed Only": {
+      "main": [
+        [
+          {
+            "node": "Set Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Variables": {
+      "main": [
+        [
+          {
+            "node": "DataForSEO - Keyword Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DataForSEO - Keyword Research": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Parse Keywords": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Store Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Store Keywords": {
+      "main": [
+        [
+          {
+            "node": "Code - Build Gemini Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Build Gemini Prompt": {
+      "main": [
+        [
+          {
+            "node": "Gemini - Generate Blog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Generate Blog": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse Gemini Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Parse Gemini Response": {
+      "main": [
+        [
+          {
+            "node": "DALL-E - Generate Image 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DALL-E - Generate Image 1": {
+      "main": [
+        [
+          {
+            "node": "Code - Save Image 1 URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Save Image 1 URL": {
+      "main": [
+        [
+          {
+            "node": "DALL-E - Generate Image 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DALL-E - Generate Image 2": {
+      "main": [
+        [
+          {
+            "node": "Code - Insert Images into Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Insert Images into Content": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Update with Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Update with Content": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare Approval Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Prepare Approval Email": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Send Approval Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Wait for Approval": {
+      "main": [
+        [
+          {
+            "node": "IF - Check Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Check Approval": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Get Article Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Airtable - Mark Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Get Article Data": {
+      "main": [
+        [
+          {
+            "node": "WordPress - Create Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WordPress - Create Post": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Mark Published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Mark Published": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Update Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Update Status": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Mark Rejected": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Rejection Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "38272fef-4dec-459b-8e93-df3ca63842ae",
+  "meta": {
+    "instanceId": "8813ab5a83ee3a00a5eaa92cf1e38056cb49875ff9045af12b4abde07c86153d"
+  },
+  "id": "3esmO5UbWWS60IqykNNUX",
+  "tags": []
+}
