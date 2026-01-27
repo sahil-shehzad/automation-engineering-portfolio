@@ -7,8 +7,8 @@ This repository showcases production-grade automation architectures designed to 
 
 **Core Tech Stack:**
 * **Orchestration:** n8n, Webhooks, Custom JavaScript
-* **AI & LLMs:** Gemini 2.5 Flash, OpenAI, Anthropic Claude
-* **Integrations:** Google Workspace, HubSpot, Slack, Firecrawl, Pinterest, Threads
+* **AI & LLMs:** Gemini 1.5 Pro, OpenAI (DALL-E 3), Anthropic Claude
+* **Integrations:** WordPress, DataForSEO, Google Workspace, Slack, Firecrawl, Pinterest, Threads
 
 ---
 
@@ -16,11 +16,12 @@ This repository showcases production-grade automation architectures designed to 
 
 | Project | Business Impact | Tech Highlights |
 | :--- | :--- | :--- |
-| **[1. Omni-Channel Social Agent](./projects/01-omni-channel-social-agent)** | Automates content for 7 platforms from 1 asset with human approval. | Gemini Vision, Custom API Nodes (Threads), Error Reporting |
-| **[2. Finance Invoice Processor](./projects/02-finance-invoice-processor)** | Eliminates manual data entry by extracting unstructured invoice data. | OCR, Regex, Google Sheets Database |
-| **[3. Cold Email Engine](./projects/03-cold-email-outreach-engine)** | Manages complex outreach sequences without expensive SaaS tools. | Custom JS Date Logic, Gmail API Threading |
-| **[4. Lead Gen Pipeline](./projects/04-lead-gen-enrichment-pipeline)** | Automates scraping and enrichment of high-volume datasets. | Firecrawl, People Data Labs API, Batch Processing |
-| **[5. Internal HR Tool: ATS Optimizer](./projects/05-internal-hr-tool-ats-optimizer)** | Automates candidate screening by scoring resumes against JDs. | PDF Parsing, Gemini 1.5 Pro, Structured JSON Output |
+| **[1. SEO Blog Content Pipeline](./projects/01-seo-blog-content-pipeline)** | Autonomous "Research-to-Publish" agent. Researches keywords, writes SEO articles, generates DALL-E 3 images, and publishes to WordPress after human approval. | DataForSEO API, Gemini 1.5 Pro, DALL-E 3, WordPress API, Advanced Prompt Engineering |
+| **[2. Omni-Channel Social Agent](./projects/02-omni-channel-social-agent)** | Automates content for 7 platforms from 1 asset with human approval. | Gemini Vision, Custom API Nodes (Threads), Error Reporting |
+| **[3. Finance Invoice Processor](./projects/03-finance-invoice-processor)** | Eliminates manual data entry by extracting unstructured invoice data. | OCR, Regex, Google Sheets Database |
+| **[4. Cold Email Engine](./projects/04-cold-email-outreach-engine)** | Manages complex outreach sequences without expensive SaaS tools. | Custom JS Date Logic, Gmail API Threading |
+| **[5. Lead Gen Pipeline](./projects/05-lead-gen-enrichment-pipeline)** | Automates scraping and enrichment of high-volume datasets. | Firecrawl, People Data Labs API, Batch Processing |
+| **[6. Internal HR Tool: ATS Optimizer](./projects/06-internal-hr-tool-ats-optimizer)** | Automates candidate screening by scoring resumes against JDs. | PDF Parsing, Gemini 1.5 Pro, Structured JSON Output |
 
 *(Click the project names to view the source code)*
 
@@ -29,7 +30,7 @@ This repository showcases production-grade automation architectures designed to 
 ## ⚙️ How to Run These Workflows
 1.  **Import:** Download the `workflow.json` file from the specific project folder.
 2.  **Load:** In your n8n instance, go to `Workflows` > `Import from File`.
-3.  **Credentials:** All sensitive API keys have been stripped for security. You must configure your own credentials in n8n (OpenAI, Google, etc.).
+3.  **Credentials:** All sensitive API keys have been stripped for security. You must configure your own credentials in n8n (OpenAI, Google, DataForSEO, etc.).
 
 ## 🛡️ Reliability Philosophy
 My automations are built for the real world:
