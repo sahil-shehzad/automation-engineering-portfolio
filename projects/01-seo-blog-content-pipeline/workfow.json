@@ -1,0 +1,1960 @@
+{
+  "name": "SEO Blog Automation - Complete Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -848,
+        -688
+      ],
+      "id": "7a483a31-c64d-4d29-95c4-cbae06df41e7",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "Your_Sheet_ID",
+          "mode": "list",
+          "cachedResultName": "Input Data for SEO Blog Automation",
+          },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Status"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -624,
+        -688
+      ],
+      "id": "0b534ca2-fa2e-4ee5-9e7d-2ac0a0eee432",
+      "name": "Get row(s) in sheet"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-1",
+              "name": "primaryKeyword",
+              "value": "={{ $json['Primary Keyword'].trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-2",
+              "name": "brandName",
+              "value": "={{ $json['Brand Name'].trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-3",
+              "name": "websiteUrl",
+              "value": "={{ $json['Website URL'].trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "assign-4",
+              "name": "sheetRowId",
+              "value": "={{ $json.row_number }}",
+              "type": "number"
+            },
+            {
+              "id": "9fad3bad-812a-4d4d-a405-d9044e9ded90",
+              "name": "serviceURLs",
+              "value": "={{ $json['Service URLs'] ? $json['Service URLs'].trim() : '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a731b562-8bab-47da-89bb-502878ef965a",
+      "name": "Set Variables",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -416,
+        -688
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_suggestions/live",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=[\n  {\n    \"keyword\": \"{{ $json.primaryKeyword }}\",\n    \"location_name\": \"United States\",\n    \"language_name\": \"English\",\n    \"include_serp_info\": true,\n    \"include_seed_keyword\": true,\n    \"limit\": 1000\n  }\n]",
+        "options": {}
+      },
+      "id": "bb9af089-6392-44d4-86e5-d71a7d590c4f",
+      "name": "DataForSEO - Keyword Research",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -208,
+        -688
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Retrieve the variables from the \"Set Variables\" node\nlet setNodeData;\ntry {\n  setNodeData = $('Set Variables').first().json; \n} catch (error) {\n  throw new Error(\"Could not find 'Set Variables'. Please ensure the node is named correctly.\");\n}\n\nconst primaryKeyword = setNodeData.primaryKeyword;\nconst brandName = setNodeData.brandName;\nconst websiteUrl = setNodeData.websiteUrl;\nconst sheetRowId = setNodeData.sheetRowId;\n\n// --- CONFIGURATION ---\nconst MIN_VOLUME = 100;  // Matches keywords with 100+ volume\nconst MAX_KD = 25;      // Matches keywords with KD less than 25\n\n// 2. Parse the DataForSEO response\nconst response = items[0].json;\n\n// Safety Check\nif (!response.tasks || response.tasks.length === 0 || \n    !response.tasks[0].result || response.tasks[0].result.length === 0) {\n  return {\n    json: {\n      primaryKeyword,\n      brandName,\n      websiteUrl,\n      sheetRowId,\n      secondaryKeywords: [],\n      lsiKeywords: [],\n      error: \"No results found in DataForSEO output\"\n    }\n  };\n}\n\n// Extract the keywords list\nconst rawItems = response.tasks[0].result[0].items || [];\n\nconst secondaryKeywords = [];\nconst lsiKeywords = [];\n\n// 3. Loop & Filter\nfor (const item of rawItems) {\n  const keywordText = item.keyword;\n  const searchVolume = item.keyword_info ? item.keyword_info.search_volume : 0;\n  \n  // Handle potentially null KD\n  const keywordDifficulty = (item.keyword_properties && item.keyword_properties.keyword_difficulty !== null) \n    ? item.keyword_properties.keyword_difficulty \n    : 0;\n\n  // --- CRITERIA ---\n  // Keep if Volume >= 70 AND KD < 50\n  if (searchVolume >= MIN_VOLUME && keywordDifficulty < MAX_KD) {\n    \n    const cleanData = {\n      keyword: keywordText,\n      volume: searchVolume,\n      kd: keywordDifficulty\n    };\n\n    // Categorize: Secondary vs LSI\n    // Secondary = Contains primary keyword string\n    // LSI = Related but distinct\n    if (keywordText.toLowerCase().includes(primaryKeyword.toLowerCase())) {\n      secondaryKeywords.push(cleanData);\n    } else {\n      lsiKeywords.push(cleanData);\n    }\n  }\n}\n\n// 4. Return Final Data\nreturn {\n  json: {\n    primaryKeyword,\n    brandName,\n    websiteUrl,\n    sheetRowId,\n    secondaryKeywords,\n    lsiKeywords,\n    matchCountSecondary: secondaryKeywords.length,\n    matchCountLSI: lsiKeywords.length,\n    filtersUsed: {\n      minVolume: MIN_VOLUME,\n      maxDifficulty: MAX_KD\n    }\n  }\n};"
+      },
+      "id": "22b892c9-8090-4cc5-ad6a-38820960bedb",
+      "name": "Code - Parse Keywords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        -688
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "Your_Airtable_Base_ID",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Your_Airtable_Table_ID",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Sheet_Row_ID": "={{ $json.sheetRowId }}",
+            "WordPress_Post_ID": 0,
+            "Primary_Keyword": "={{ $json.primaryKeyword }}",
+            "Brand_Name": "={{ $json.brandName }}",
+            "Website_URL": "={{ $json.websiteUrl }}",
+            "Secondary_Keywords": "={{ $json.secondaryKeywords.map(k => `${k.keyword} (Vol: ${k.volume}, KD: ${k.kd})`).join('\\n') }}",
+            "LSI_Keywords": "={{ $json.lsiKeywords.map(k => `${k.keyword} (Vol: ${k.volume}, KD: ${k.kd})`).join('\\n') }}",
+            "Research_Date": "={{ $now.toFormat('yyyy-MM-dd HH:mm:ss') }}",
+            "Status": "Keywords_Collected",
+            "Service_URLs": "={{ $json.servicePages.join('\\n') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Primary_Keyword",
+              "displayName": "Primary_Keyword",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Brand_Name",
+              "displayName": "Brand_Name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Website_URL",
+              "displayName": "Website_URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Service_URLs",
+              "displayName": "Service_URLs",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Secondary_Keywords",
+              "displayName": "Secondary_Keywords",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "LSI_Keywords",
+              "displayName": "LSI_Keywords",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Research_Date",
+              "displayName": "Research_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Keywords_Collected",
+                  "value": "Keywords_Collected"
+                },
+                {
+                  "name": "Content_Generated",
+                  "value": "Content_Generated"
+                },
+                {
+                  "name": "Published",
+                  "value": "Published"
+                },
+                {
+                  "name": "Rejected",
+                  "value": "Rejected"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Sheet_Row_ID",
+              "displayName": "Sheet_Row_ID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Meta_Title",
+              "displayName": "Meta_Title",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Meta_Description",
+              "displayName": "Meta_Description",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Blog_Content",
+              "displayName": "Blog_Content",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Image_1_URL",
+              "displayName": "Image_1_URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Generated_Date",
+              "displayName": "Generated_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "WordPress_URL",
+              "displayName": "WordPress_URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "WordPress_Post_ID",
+              "displayName": "WordPress_Post_ID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Published_Date",
+              "displayName": "Published_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Rejection_Date",
+              "displayName": "Rejection_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Rejection_Reason",
+              "displayName": "Rejection_Reason",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        448,
+        -688
+      ],
+      "id": "0cc18598-f0f9-4a88-9d85-25e9a2052bb3",
+      "name": "Airtable - Store Keywords"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. GET INPUT DATA\nconst item = items[0].json;\nconst fields = item.fields;\n\nconst primaryKeyword = fields.Primary_Keyword || \"Topic\";\nconst brandName = fields.Brand_Name || \"Brand\";\nconst websiteUrl = fields.Website_URL || \"\";\nconst secondaryKeywordsRaw = fields.Secondary_Keywords || '';\nconst lsiKeywordsRaw = fields.LSI_Keywords || '';\n\n// 2. PARSE KEYWORDS (Clean up formatting)\nconst secondaryKeywords = secondaryKeywordsRaw\n  .split('\\n')\n  .filter(k => k.trim())\n  .map(k => k.split(' (Vol:')[0].trim())\n  .slice(0, 10); \n\nconst lsiKeywords = lsiKeywordsRaw\n  .split('\\n')\n  .filter(k => k.trim())\n  .map(k => k.split(' (Vol:')[0].trim())\n  .slice(0, 10);\n\n// 3. GET SERVICE PAGES (Prioritize Direct Input)\nlet servicePagesRaw = [];\n\n// Option A: Get directly from Airtable fields (Safest)\nif (fields.Service_URLs && typeof fields.Service_URLs === 'string') {\n    servicePagesRaw = fields.Service_URLs.split('\\n').map(url => url.trim()).filter(url => url.length > 0);\n} \n// Option B: Reach back to previous node (Fallback)\nelse {\n    try {\n        servicePagesRaw = $('Code - Fetch Service Pages').first().json.servicePages || [];\n    } catch (e) {\n        // console.log(\"Service pages not found\");\n    }\n}\n\n// 4. BUILD INTERNAL LINKING SECTION\nlet internalLinkingSection = '';\n\nif (servicePagesRaw.length > 0) {\n  internalLinkingSection = `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔗 INTERNAL LINKING STRATEGY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nYou MUST include internal links to the following service pages where contextually relevant.\nDo not force them; they must fit naturally.\n\nAVAILABLE PAGES:\n`;\n\n  // Loop through URLs and create readable titles\n  servicePagesRaw.forEach((url, index) => {\n    // Extract a readable title from the URL slug\n    // Ex: \"domain.com/dental-implants/\" -> \"Dental Implants\"\n    let slug = url.split('/').filter(s => s).pop() || \"Service Page\";\n    // Remove query params if any\n    slug = slug.split('?')[0];\n    // Format: \"dental-implants\" -> \"Dental Implants\"\n    const readableTitle = slug.replace(/-/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase());\n\n    internalLinkingSection += `${index + 1}. TOPIC: \"${readableTitle}\"\n   🔗 URL: ${url}\n`;\n  });\n\n  internalLinkingSection += `\n⚡ LINKING RULES:\n1. QUANTITY: Include 3-6 internal links total throughout the article.\n2. PLACEMENT: Distribute them evenly (Intro, Body, Conclusion).\n3. ANCHOR TEXT: Use descriptive, natural keywords (e.g., \"our pediatric dental services\" NOT \"click here\").\n4. FORMAT: <a href=\"URL\">anchor text</a>\n`;\n} else {\n    internalLinkingSection = \"Note: No specific internal links provided. Focus on external authority links where necessary.\";\n}\n\n// 5. BUILD THE PROMPT\nconst fullPrompt = `\nYou are an expert SEO content writer for ${brandName}. Write a comprehensive, high-ranking blog post.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📊 CORE METADATA\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTARGET KEYWORD: ${primaryKeyword}\nBRAND NAME: ${brandName}\nWEBSITE: ${websiteUrl}\n\nSECONDARY KEYWORDS (Integrate 5-8 naturally):\n${secondaryKeywords.join(', ')}\n\nLSI KEYWORDS (Use for context):\n${lsiKeywords.join(', ')}\n\n${internalLinkingSection}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📝 ARTICLE STRUCTURE & REQUIREMENTS\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n1. LENGTH: 1500+ words.\n2. TONE: Professional, authoritative, yet easy to read (8th-grade reading level).\n3. FORMATTING:\n   - Use H1 for the Main Title.\n   - Use H2 for Main Sections (Include Primary Keyword in at least two H2s).\n   - Use H3 for Sub-sections.\n   - Use Bullet points and Bold text for readability.\n\n4. CONTENT OUTLINE:\n   - H1 Title: Catchy, includes \"${primaryKeyword}\"\n   - Introduction: Hook the reader, define the problem, state the solution.\n   - What is ${primaryKeyword}?\n   - Benefits/Importance of ${primaryKeyword}\n   - Detailed Guide/Process/Types (Deep Dive)\n   - Common Questions / Misconceptions\n   - Conclusion: Summary + Soft CTA for ${brandName}.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚙️ OUTPUT FORMAT (STRICT JSON)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nYou must return a SINGLE valid JSON object. Do not add markdown blocks like \\`\\`\\`json.\nStructure:\n{\n  \"title\": \"The H1 Title of the article\",\n  \"metaDescription\": \"A click-worthy meta description (max 160 chars)\",\n  \"content\": \"The full HTML blog post content (starting from H2, excluding H1)\",\n  \"excerpt\": \"A short summary (50 words)\"\n}\n\nIMPORTANT: \n- The \"content\" field must contain HTML tags (<h2>, <p>, <ul>, <li>, <strong>, <a href...>).\n- Do not put the H1 inside the \"content\" field (it goes in \"title\").\n- Ensure all JSON syntax is valid (escape quotes properly).\n`;\n\n// 6. RETURN\nreturn {\n  json: {\n    prompt: fullPrompt,\n    primaryKeyword: primaryKeyword,\n    brandName: brandName,\n    websiteUrl: websiteUrl,\n    airtableRecordId: item.id,\n    servicePagesCount: servicePagesRaw.length\n  }\n};"
+      },
+      "id": "b57358b5-0554-44e8-b122-84ebe0622320",
+      "name": "Code - Build Gemini Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        -688
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. GET THE RAW AI RESPONSE\nconst item = $input.first().json;\nlet rawContent = \"\";\n\n// Robust check for different AI providers\nif (item.choices && item.choices[0] && item.choices[0].message) {\n    rawContent = item.choices[0].message.content; \n} else if (item.response) {\n    rawContent = item.response;\n} else if (item.content) {\n    rawContent = item.content;\n}\n\n// Initialize Variables\nlet title = \"Draft Article\";\nlet metaDescription = \"\";\nlet blogContent = \"\";\nlet excerpt = \"\";\nlet keyword = \"Dental Care\"; // Default fallback\n\n// 2. PARSE STRATEGY A: Strict JSON Parse\ntry {\n    // Clean up markdown fences\n    const cleanJson = rawContent.replace(/```json\\n?|\\n?```/g, \"\").trim();\n    // Attempt parse\n    const parsedData = JSON.parse(cleanJson);\n    \n    // If successful, assign variables\n    title = parsedData.title || title;\n    metaDescription = parsedData.metaDescription || metaDescription;\n    blogContent = parsedData.content || blogContent;\n    excerpt = parsedData.excerpt || excerpt;\n    keyword = parsedData.focusKeyword || keyword;\n\n} catch (e) {\n    console.log(\"Strict JSON Parse Failed. Switching to Regex Rescue.\");\n    \n    // 3. PARSE STRATEGY B: \"Regex Rescue\" (Manual Extraction)\n    // This extracts text between quotes even if the JSON is broken\n    \n    // Extract Title\n    const titleMatch = rawContent.match(/\"title\":\\s*\"([^\"]+)\"/);\n    if (titleMatch) title = titleMatch[1];\n\n    // Extract Content (Smart capture for escaped quotes)\n    // We look for \"content\": \" ... \" and capture everything until the next quote-comma or quote-brace\n    const contentMatch = rawContent.match(/\"content\":\\s*\"([\\s\\S]*?)(?<!\\\\)\"\\s*(,|})/);\n    if (contentMatch) {\n        // Unescape the content (turn \\\" into \" and \\n into newlines)\n        let rawBody = contentMatch[1];\n        try {\n            // We interpret it as a JSON string to handle escapes correctly\n            blogContent = JSON.parse('\"' + rawBody + '\"');\n        } catch (err) {\n            // If that fails, just unescape manually\n            blogContent = rawBody.replace(/\\\\\"/g, '\"').replace(/\\\\n/g, '\\n');\n        }\n    }\n\n    // Extract Meta Description\n    const metaMatch = rawContent.match(/\"metaDescription\":\\s*\"([^\"]+)\"/);\n    if (metaMatch) metaDescription = metaMatch[1];\n    \n    // Extract Excerpt\n    const excerptMatch = rawContent.match(/\"excerpt\":\\s*\"([^\"]+)\"/);\n    if (excerptMatch) excerpt = excerptMatch[1];\n}\n\n// 4. FINAL SAFETY CHECK\n// If extraction completely failed, use raw content as fallback so you don't lose data\nif (!blogContent || blogContent.length < 50) {\n    blogContent = rawContent;\n}\n\n// 5. AUTO-GENERATE IMAGE PROMPT\nconst autoImagePrompt = `Professional photography of ${keyword}, bright, clean, medical context, high quality, 4k`;\n\n// 6. RETURN\nreturn {\n    ...item, \n    metaTitle: title,\n    metaDescription: metaDescription,\n    blogContent: blogContent,\n    excerpt: excerpt,\n    image1: {\n        alt: keyword,\n        prompt: autoImagePrompt\n    }\n};"
+      },
+      "id": "84100166-e6b5-484a-b82c-3014b9d8a36b",
+      "name": "Code - Parse Llama Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        -688
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. REACH BACK to get Image 1 URL\nlet image1Url = \"\";\ntry {\n    // Ensure this matches your node name EXACTLY\n    const imageNode = $('Code - Save Image 1 URL').first();\n    if (imageNode && imageNode.json) {\n        image1Url = imageNode.json.image1Url;\n    }\n} catch (e) {\n    console.log(\"Could not find Image 1 node\");\n}\n\n// 2. REACH BACK to get the Blog Content\nlet sourceNode = {};\ntry {\n    sourceNode = $('Code - Parse Llama Response').first().json;\n} catch (e) {\n    console.log(\"Could not find Parse Llama Response node\");\n}\n\nlet finalContent = sourceNode.blogContent || \"\";\nconst image1Alt = sourceNode.image1 ? sourceNode.image1.alt : \"Blog Image\";\n\n// 3. Create the Image HTML\n// We use a <figure> tag for perfect WordPress centering\nlet img1Html = \"\";\nif (image1Url) {\n    img1Html = `<figure style=\"margin: 30px 0; text-align: center;\"><img src=\"${image1Url}\" alt=\"${image1Alt}\" style=\"width:100%; height:auto; max-width:800px; border-radius: 8px;\" /></figure>`;\n}\n\n// 4. INTELLIGENT INJECTION (The Fix)\nif (img1Html) {\n    // Case A: Placeholder Exists (Ideal)\n    if (finalContent.includes(\"[IMAGE_1_PLACEHOLDER]\")) {\n        finalContent = finalContent.replace(\"[IMAGE_1_PLACEHOLDER]\", img1Html);\n    } \n    // Case B: No Placeholder? Insert AFTER the Main Title (H1)\n    else {\n        // Regex to find the first Markdown H1 (e.g., \"# My Title\")\n        const h1Regex = /^# .+/m;\n        const match = finalContent.match(h1Regex);\n\n        if (match) {\n            // Insert the image immediately AFTER the H1 line\n            finalContent = finalContent.replace(match[0], match[0] + \"\\n\\n\" + img1Html);\n        } else {\n            // Case C: No H1 found? Just put it at the very top.\n            finalContent = img1Html + \"\\n\\n\" + finalContent;\n        }\n    }\n}\n\n// 5. Return Result\nreturn {\n    metaTitle: sourceNode.metaTitle,\n    metaDescription: sourceNode.metaDescription,\n    finalContent: finalContent,\n    image1Url: $input.first().json.data[0].url\n};"
+      },
+      "id": "064f4e4f-c988-4fb4-ac6f-f3d43a29e239",
+      "name": "Code - Insert Images into Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        -688
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "Your_Airtable_Base_ID",
+          "mode": "list",
+          "cachedResultName": "SEO Content Database",
+        },
+        "table": {
+          "__rl": true,
+          "value": "Your_Airtable_Table_ID",
+          "mode": "list",
+          "cachedResultName": "Keywords_Database",},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $('Airtable - Store Keywords').item.json.id }}",
+            "WordPress_Post_ID": 0,
+            "Status": "Content_Generated",
+            "Meta_Title": "={{ $json.metaTitle }}",
+            "Meta_Description": "={{ $json.metaDescription }}",
+            "Blog_Content": "={{ $json.finalContent }}",
+            "Image_1_URL": "={{ $json.image1Url }}",
+            "Generated_Date": "={{ $now.toFormat('yyyy-MM-dd HH:mm:ss') }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "Primary_Keyword",
+              "displayName": "Primary_Keyword",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Brand_Name",
+              "displayName": "Brand_Name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Website_URL",
+              "displayName": "Website_URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Service_URLs",
+              "displayName": "Service_URLs",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Secondary_Keywords",
+              "displayName": "Secondary_Keywords",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "LSI_Keywords",
+              "displayName": "LSI_Keywords",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Research_Date",
+              "displayName": "Research_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Keywords_Collected",
+                  "value": "Keywords_Collected"
+                },
+                {
+                  "name": "Content_Generated",
+                  "value": "Content_Generated"
+                },
+                {
+                  "name": "Published",
+                  "value": "Published"
+                },
+                {
+                  "name": "Rejected",
+                  "value": "Rejected"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Sheet_Row_ID",
+              "displayName": "Sheet_Row_ID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "Meta_Title",
+              "displayName": "Meta_Title",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Meta_Description",
+              "displayName": "Meta_Description",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Blog_Content",
+              "displayName": "Blog_Content",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Image_1_URL",
+              "displayName": "Image_1_URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Generated_Date",
+              "displayName": "Generated_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "WordPress_URL",
+              "displayName": "WordPress_URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "WordPress_Post_ID",
+              "displayName": "WordPress_Post_ID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Published_Date",
+              "displayName": "Published_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Rejection_Date",
+              "displayName": "Rejection_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Rejection_Reason",
+              "displayName": "Rejection_Reason",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        1760,
+        -688
+      ],
+      "id": "c1aa9309-fbf4-4aab-ab8f-9ca52f6b4d70",
+      "name": "Update record"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. CONFIGURATION\n// PASTE YOUR WEBHOOK URL HERE\nconst webhookUrl = \"https://your-n8n-instance.com/webhook/publish-blog"; \nconst imageNodeName = 'Code - Save Image 1 URL'; \n\n// 2. Get the Input Data (Airtable Structure)\nconst item = $input.first().json;\nconst fields = item.fields;\n\n// 3. Extract Variables safely\nconst primaryKeyword = fields.Primary_Keyword || \"Default Keyword\";\nconst brandName = fields.Brand_Name || \"Brand Name\";\nconst websiteUrl = fields.Website_URL || \"#\";\nconst metaTitle = fields.Meta_Title || \"No Title\";\nconst finalContent = fields.Blog_Content || \"\";\n\n// 4. REACH BACK to get Image URL (Restored Feature)\nlet image1Url = \"\";\ntry {\n    image1Url = $(imageNodeName).first().json.image1Url;\n} catch (e) {\n    // Fallback: Check if it's in the input fields if saved to Airtable previously\n    if (fields.Image_1_URL) image1Url = fields.Image_1_URL;\n}\n\n// 5. Handle Keywords (Restored LSI)\nconst secondaryKeywordsStr = (fields.Secondary_Keywords || \"None\").replace(/\\n/g, \"<br>\");\nconst lsiKeywordsStr = (fields.LSI_Keywords || \"None\").replace(/\\n/g, \"<br>\");\n\n// 6. Convert Markdown to HTML (Clean format)\nlet contentHtml = finalContent\n  .replace(/^# (.+)$/gm, '<h1>$1</h1>')\n  .replace(/^## (.+)$/gm, '<h2>$1</h2>')\n  .replace(/^### (.+)$/gm, '<h3>$1</h3>')\n  .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')\n  .replace(/\\*(.+?)\\*/g, '<em>$1</em>')\n  .replace(/\\n/g, '<br>');\n\n// 7. Generate Approval Links\nconst approveLink = `${webhookUrl}?action=approve&id=${item.id}`;\nconst rejectLink = `${webhookUrl}?action=reject&id=${item.id}`;\n\n// 8. Build the Email HTML\nconst emailHtml = `\n<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }\n    .header { background: #4CAF50; color: white; padding: 20px; border-radius: 8px; margin-bottom: 30px; }\n    .content-preview { background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin: 20px 0; }\n    .meta-info { background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 15px 0; }\n    .keyword-box { background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 5px solid #4CAF50; }\n    .stats { display: flex; justify-content: space-around; margin: 20px 0; }\n    .stat-box { text-align: center; padding: 15px; background: #f9f9f9; border-radius: 8px; width: 45%; }\n    \n    /* ACTION BUTTONS (Moved to Bottom) */\n    .btn-container { text-align: center; margin-top: 40px; padding: 30px; background: #fff3cd; border-radius: 8px; border: 2px solid #ffeeba; }\n    .btn { display: inline-block; padding: 15px 30px; margin: 10px; text-decoration: none; color: white; border-radius: 5px; font-weight: bold; font-size: 16px; }\n    .btn-approve { background-color: #28a745; border-bottom: 3px solid #1e7e34; }\n    .btn-reject { background-color: #dc3545; border-bottom: 3px solid #bd2130; }\n    \n    img { max-width: 100%; height: auto; border-radius: 4px; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>🎯 New Blog Ready for Approval</h1>\n    <p>Generated: ${new Date().toLocaleString()}</p>\n  </div>\n  \n  <div class=\"meta-info\">\n    <h2>📊 Metadata</h2>\n    <p><strong>Target Website:</strong> <a href=\"${websiteUrl}\">${websiteUrl}</a></p>\n    <p><strong>Brand:</strong> ${brandName}</p>\n    <p><strong>Meta Title:</strong> ${metaTitle}</p>\n  </div>\n\n  <div class=\"stats\">\n    <div class=\"stat-box\"><h3>${finalContent.split(' ').length}</h3><p>Words</p></div>\n    <div class=\"stat-box\"><h3>${image1Url ? \"Yes\" : \"No\"}</h3><p>Image Included</p></div>\n  </div>\n\n  <div class=\"keyword-box\">\n    <h3>🔑 Keywords Strategy</h3>\n    <p><strong>Primary:</strong> ${primaryKeyword}</p>\n    <hr style=\"border:0; border-top:1px solid #ddd;\">\n    <p><strong>Secondary:</strong><br>${secondaryKeywordsStr}</p>\n    <hr style=\"border:0; border-top:1px solid #ddd;\">\n    <p><strong>LSI:</strong><br>${lsiKeywordsStr}</p>\n  </div>\n\n  <div class=\"content-preview\">\n    <h2>📝 Content Preview:</h2>\n    \n    ${image1Url ? `<div style=\"text-align:center; margin-bottom:20px;\"><img src=\"${image1Url}\" alt=\"Blog Image\" style=\"max-height:300px;\"></div>` : ''}\n    \n    ${image1Url ? `<p style=\"font-size:12px; color:#666;\"><strong>Image Source:</strong> <a href=\"${image1Url}\">Click to view full size</a></p>` : ''}\n\n    <hr>\n    ${contentHtml}\n  </div>\n\n  <div class=\"btn-container\">\n    <h2>🚀 Ready to Publish?</h2>\n    <p>Review the content above. If it looks good, click Approve to publish immediately.</p>\n    <br>\n    <a href=\"${approveLink}\" class=\"btn btn-approve\">✅ APPROVE & PUBLISH</a>\n    <a href=\"${rejectLink}\" class=\"btn btn-reject\">❌ REJECT</a>\n  </div>\n\n</body>\n</html>\n`;\n\n// 9. Return Data\nreturn {\n  ...item,\n  approvalEmailHtml: emailHtml,\n  approvalEmailSubject: `[ACTION REQUIRED] Review Blog: \"${metaTitle}\"`\n};"
+      },
+      "id": "6b9cda7d-31a6-485f-8649-433e7cf968ba",
+      "name": "Code - Prepare Approval Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1968,
+        -688
+      ]
+    },
+    {
+      "parameters": {
+        "path": "publish-blog",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "d8b13064-fa13-43c3-ad4f-382a9f7bb02a",
+      "name": "Webhook - Wait for Approval",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        -224
+      ],
+      "webhookId": "your-unique-webhook-id"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition-1",
+              "leftValue": "={{ $json.query.action }}",
+              "rightValue": "approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "061ea7f6-77ee-4bf0-96c6-bdfc2ad89b50",
+      "name": "IF - Check Approval",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        -224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "Your_Google_Sheet_ID",
+          "mode": "list",
+          "cachedResultName": "Input Data for SEO Blog Automation",
+         },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "Published",
+            "Primary Keyword": "={{ $json.fields.Primary_Keyword }}"
+          },
+          "matchingColumns": [
+            "Primary Keyword"
+          ],
+          "schema": [
+            {
+              "id": "Primary Keyword",
+              "displayName": "Primary Keyword",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Brand Name",
+              "displayName": "Brand Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Website URL",
+              "displayName": "Website URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Service URLs",
+              "displayName": "Service URLs",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "a589e6b6-1216-423b-bb0d-92cb74a9fd38",
+      "name": "Google Sheets - Update Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        960,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "Your_Airtable_Base_ID",
+          "mode": "list",
+          "cachedResultName": "SEO Content Database",
+          },
+        "table": {
+          "__rl": true,
+          "value": "Your_Airtable_Table_ID",
+          "mode": "list",
+          "cachedResultName": "Keywords_Database",},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "Rejected",
+            "Sheet_Row_ID": 0,
+            "WordPress_Post_ID": 0,
+            "Rejection_Date": "={{ $now.toFormat('yyyy-MM-dd HH:mm:ss') }}",
+            "id": "={{ $json.query.id }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true,
+              "removed": false
+            },
+            {
+              "id": "Primary_Keyword",
+              "displayName": "Primary_Keyword",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Brand_Name",
+              "displayName": "Brand_Name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Website_URL",
+              "displayName": "Website_URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Secondary_Keywords",
+              "displayName": "Secondary_Keywords",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "LSI_Keywords",
+              "displayName": "LSI_Keywords",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Research_Date",
+              "displayName": "Research_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Keywords_Collected",
+                  "value": "Keywords_Collected"
+                },
+                {
+                  "name": "Content_Generated",
+                  "value": "Content_Generated"
+                },
+                {
+                  "name": "Published",
+                  "value": "Published"
+                },
+                {
+                  "name": "Rejected",
+                  "value": "Rejected"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Sheet_Row_ID",
+              "displayName": "Sheet_Row_ID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Meta_Title",
+              "displayName": "Meta_Title",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Meta_Description",
+              "displayName": "Meta_Description",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Blog_Content",
+              "displayName": "Blog_Content",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Image_1_URL",
+              "displayName": "Image_1_URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Image_2_URL",
+              "displayName": "Image_2_URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Generated_Date",
+              "displayName": "Generated_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "WordPress_URL",
+              "displayName": "WordPress_URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "WordPress_Post_ID",
+              "displayName": "WordPress_Post_ID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Published_Date",
+              "displayName": "Published_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Rejection_Date",
+              "displayName": "Rejection_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Rejection_Reason",
+              "displayName": "Rejection_Reason",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "b0324965-d2e7-4ad1-a4a8-2cec9b0731fc",
+      "name": "Airtable - Mark Rejected",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        96,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "toRecipients": "user@example.com",
+        "subject": "={{ $json.rejectionEmailSubject }}",
+        "bodyContent": "={{ $json.rejectionEmailHtml }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        512,
+        -96
+      ],
+      "id": "683558dd-ae22-4329-9d9f-0e6bc30ad0f8",
+      "name": "Email - Rejection Notice",
+      "webhookId": "2fa9c5bf-8c69-4e37-abc2-d458d54e0faf"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. CONFIGURATION\nconst imageNodeName = 'Code - Save Image 1 URL'; \n\n// 2. GET DATA\nconst item = $input.first().json;\nconst rawContent = item.Blog_Content || \"\";\nconst primaryKeyword = item.Primary_Keyword || \"\";\n\n// 3. GET IMAGE URL\nlet image1Url = \"\";\ntry {\n    image1Url = $(imageNodeName).first().json.image1Url;\n} catch (e) {\n    if (item.Image_1_URL) image1Url = item.Image_1_URL;\n}\n\n// 4. PREPARE IMAGE HTML\n// We use a clean, centered figure with a shadow for a professional look.\nconst image1Alt = primaryKeyword ? `${primaryKeyword} Overview` : \"Dental Care\";\nlet imgHtml = \"\";\nif (image1Url) {\n    imgHtml = `<figure style=\"margin: 40px 0; text-align: center;\"><img src=\"${image1Url}\" alt=\"${image1Alt}\" style=\"width:100%; height:auto; max-width:800px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);\" /></figure>`;\n}\n\n// 5. INJECT IMAGE (Smart Fallback)\nlet content = rawContent;\n\nif (imgHtml) {\n    if (content.includes(\"[IMAGE_1_PLACEHOLDER]\")) {\n        content = content.replace(\"[IMAGE_1_PLACEHOLDER]\", imgHtml);\n    } else {\n        // Fallback: Inject after the first H1 title\n        const h1Regex = /^# .+/m;\n        const match = content.match(h1Regex);\n        if (match) {\n            content = content.replace(match[0], match[0] + \"\\n\\n\" + imgHtml);\n        } else {\n            content = imgHtml + \"\\n\\n\" + content;\n        }\n    }\n} else {\n    content = content.replace(\"[IMAGE_1_PLACEHOLDER]\", \"\");\n}\n\n// 6. FORMATTING (Markdown to Styled HTML)\n// We apply specific CSS styles to override your theme's \"handwritten\" or \"italic\" defaults.\n\n// Define Styles\nconst fontStack = 'font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif';\nconst styleH1 = `style=\"${fontStack}; font-size: 36px; font-weight: 700; line-height: 1.2; color: #111; margin-bottom: 20px; font-style: normal;\"`;\nconst styleH2 = `style=\"${fontStack}; font-size: 30px; font-weight: 600; line-height: 1.3; color: #222; margin-top: 40px; margin-bottom: 20px; font-style: normal;\"`;\nconst styleH3 = `style=\"${fontStack}; font-size: 24px; font-weight: 600; line-height: 1.4; color: #333; margin-top: 30px; margin-bottom: 15px; font-style: normal;\"`;\nconst styleP  = `style=\"${fontStack}; font-size: 18px; line-height: 1.6; color: #333; margin-bottom: 20px; font-style: normal;\"`;\nconst styleLi = `style=\"${fontStack}; font-size: 18px; line-height: 1.6; color: #333; margin-bottom: 8px;\"`;\nconst styleTable = `style=\"${fontStack}; width: 100%; border-collapse: collapse; margin: 30px 0; font-size: 16px;\"`;\nconst styleTh = `style=\"background-color: #f4f4f4; padding: 12px; border: 1px solid #ddd; font-weight: bold; text-align: left;\"`;\nconst styleTd = `style=\"padding: 12px; border: 1px solid #ddd;\"`;\n\nconst lines = content.split('\\n');\nlet finalHtml = \"\";\nlet inList = false;\nlet inTable = false;\n\nlines.forEach((line) => {\n    let text = line.trim();\n\n    // --- HEADERS ---\n    if (text.startsWith('#')) {\n        if (inList) { finalHtml += \"</ul>\\n\"; inList = false; }\n        if (inTable) { finalHtml += \"</table>\\n\"; inTable = false; }\n        \n        if (text.startsWith('### ')) finalHtml += `<h3 ${styleH3}>${text.replace('### ', '')}</h3>\\n`;\n        else if (text.startsWith('## ')) finalHtml += `<h2 ${styleH2}>${text.replace('## ', '')}</h2>\\n`;\n        else if (text.startsWith('# ')) finalHtml += `<h1 ${styleH1}>${text.replace('# ', '')}</h1>\\n`;\n        return;\n    }\n\n    // --- LISTS ---\n    if (text.startsWith('- ') || text.startsWith('* ')) {\n        if (inTable) { finalHtml += \"</table>\\n\"; inTable = false; }\n        if (!inList) { finalHtml += `<ul style=\"margin-left: 20px; margin-bottom: 20px;\">\\n`; inList = true; }\n        \n        // Remove italics symbols (*) if the AI added them to list items\n        let cleanText = text.substring(2).replace(/\\*/g, ''); \n        finalHtml += `<li ${styleLi}>${cleanText}</li>\\n`;\n        return;\n    }\n    if (inList && !text.startsWith('- ') && !text.startsWith('* ') && text !== \"\") {\n        finalHtml += \"</ul>\\n\";\n        inList = false;\n    }\n\n    // --- TABLES ---\n    if (text.startsWith('|')) {\n        if (inList) { finalHtml += \"</ul>\\n\"; inList = false; }\n        if (!inTable) { \n            finalHtml += `<table ${styleTable}>\\n`; \n            inTable = true; \n        }\n        if (text.includes('---')) return; \n        \n        const cells = text.split('|').filter(c => c.trim() !== \"\");\n        finalHtml += \"<tr>\";\n        cells.forEach((cell, i) => {\n            // Heuristic: If it's the first row of the table, make it a Header (th)\n            // (We assume the first row processed is the header)\n            // Note: This is a simple check; for complex tables, this might need adjustment.\n            // For safety, we use TD generally, unless we implement a robust counter.\n            // Let's stick to TD with clean styling for consistency.\n            finalHtml += `<td ${styleTd}>${cell.trim().replace(/\\*/g, '')}</td>`;\n        });\n        finalHtml += \"</tr>\\n\";\n        return;\n    }\n    if (inTable && !text.startsWith('|') && text !== \"\") {\n        finalHtml += \"</table>\\n\";\n        inTable = false;\n    }\n\n    // --- IMAGES/HTML ---\n    if (text.startsWith('<figure') || text.startsWith('<img') || text.startsWith('<div')) {\n        finalHtml += text + \"\\n\";\n        return;\n    }\n\n    // --- PARAGRAPHS ---\n    if (text === \"\") return;\n    \n    // Remove Markdown Italics wrappers (*) if they exist, to force clean text\n    // E.g. \" *This is text* \" -> \" This is text \"\n    // Only remove start/end asterisks, preserve internal ones if needed\n    let cleanText = text;\n    if (cleanText.startsWith('*') && cleanText.endsWith('*')) {\n        cleanText = cleanText.substring(1, cleanText.length - 1);\n    }\n\n    finalHtml += `<p ${styleP}>${cleanText}</p>\\n`;\n});\n\nif (inList) finalHtml += \"</ul>\\n\";\nif (inTable) finalHtml += \"</table>\\n\";\n\n// 7. BOLDING KEYWORDS\nif (primaryKeyword) {\n    try {\n        const regex = new RegExp(`(${primaryKeyword})(?![^<]*>)`, 'gi');\n        finalHtml = finalHtml.replace(regex, '<strong>$1</strong>');\n    } catch (e) {}\n}\n\n// 8. RETURN\nreturn {\n    ...item,\n    formattedContent: finalHtml\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        -320
+      ],
+      "id": "0f1d6f7b-6127-4be2-860f-5755057e947b",
+      "name": "Formatting the text for Publising"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer Your_API_Key"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"meta-llama/llama-3.3-70b-instruct:free\",\n  \"messages\": [\n      {\n        \"role\": \"user\",\n        \"content\": {{ JSON.stringify($json.prompt) }}\n      }\n    ]\n  \n}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        848,
+        -688
+      ],
+      "id": "d3673c37-76da-4416-ae80-2f8befe6e9b2",
+      "name": "Generate Blog - (Meta: Llama 3.3 70B Instruct)1",
+      "alwaysOutputData": false,
+      "retryOnFail": true,
+      "maxTries": 5
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.infip.pro/v1/images/generations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer Your_API_Key"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "img4"
+            },
+            {
+              "name": "prompt",
+              "value": "={{ $json.image1.prompt }}"
+            },
+            {
+              "name": "n",
+              "value": "1"
+            },
+            {
+              "name": "size",
+              "value": "1792x1024"
+            },
+            {
+              "name": "response_format",
+              "value": "url"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1296,
+        -688
+      ],
+      "id": "d0e3d54a-aa6f-47f5-99a5-2bae298be805",
+      "name": "Generate Image - (Ghostbot Web)",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "base": {
+          "__rl": true,
+          "value": "Your_Airtable_Base_ID",
+          "mode": "list",
+          "cachedResultName": "SEO Content Database",
+          },
+        "table": {
+          "__rl": true,
+          "value": "Your_Airtable_Table_ID",
+          "mode": "list",
+          "cachedResultName": "Keywords_Database",
+          },
+        "id": "={{ $json.query.id }}",
+        "options": {}
+      },
+      "id": "659cfbb8-383a-4a77-9db2-311fcd0d2466",
+      "name": "Airtable - Get Article Data",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        96,
+        -320
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the Input Data (Airtable Structure)\nconst item = $input.first().json;\nconst fields = item.fields;\n\n// 2. Extract Variables\nconst metaTitle = fields.Meta_Title || \"Untitled Article\";\nconst rejectionDate = new Date().toLocaleString(); // Current timestamp\n\n// 3. Build the Simple Rejection Email HTML\nconst emailHtml = `\n<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: #dc3545; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center; }\n    .content-box { background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 8px; }\n    .meta-info { background: #f8d7da; color: #721c24; padding: 15px; border-radius: 5px; margin: 15px 0; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>❌ Blog Rejected</h1>\n  </div>\n  \n  <div class=\"content-box\">\n    <p>The following blog post was reviewed and <strong>rejected</strong> by the user.</p>\n    \n    <div class=\"meta-info\">\n      <p><strong>Article Title:</strong> ${metaTitle}</p>\n      <p><strong>Rejection Date:</strong> ${rejectionDate}</p>\n    </div>\n\n    <p><strong>Status:</strong> No further action will be taken. This draft has been marked as \"Rejected\" in Airtable.</p>\n  </div>\n</body>\n</html>\n`;\n\n// 4. Return Data\nreturn {\n  ...item,\n  rejectionEmailHtml: emailHtml,\n  rejectionEmailSubject: `[REJECTED] Blog: \"${metaTitle}\"`\n};"
+      },
+      "id": "b9312c47-464c-4ccf-aeff-0afc8c982610",
+      "name": "Code - Prepare Rejection Notice Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "toRecipients": "user@example.com, user@example.com",
+        "subject": "={{ $json.successEmailSubject }}",
+        "bodyContent": "={{ $json.successEmailHtml }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        -320
+      ],
+      "id": "502ab2a0-3009-4773-8dbd-7215ea7da50e",
+      "name": "Email - Success Notification",
+      "webhookId": "2fa9c5bf-8c69-4e37-abc2-d458d54e0faf"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. CONFIGURATION\n// Enter the EXACT name of your Set Variables node here\nconst variablesNodeName = 'Set Variables'; \n\n// 2. GET INPUT\nconst item = $input.first().json;\n\n// 3. FETCH SERVICE URLS (Robust Method)\nlet serviceUrlsString = \"\";\n\n// Option A: Check if it exists in the current input (with CORRECT spelling)\nif (item.serviceURLs) {\n    serviceUrlsString = item.serviceURLs;\n} \n// Option B: Reach back to the specific node if missing from input\nelse {\n    try {\n        serviceUrlsString = $(variablesNodeName).first().json.serviceURLs;\n    } catch (e) {\n        // console.log(\"Could not find Set Variables node\");\n    }\n}\n\n// 4. PROCESS THE URLS\n// If still empty, return original item with empty list\nif (!serviceUrlsString || typeof serviceUrlsString !== 'string' || serviceUrlsString.trim() === '') {\n  return {\n      ...item,\n      servicePages: [],\n      servicePagesCount: 0\n  };\n}\n\n// Split by newline and clean up whitespace\nconst urls = serviceUrlsString.split('\\n')\n    .map(url => url.trim())\n    .filter(url => url.length > 0);\n\n// 5. RETURN\nreturn {\n    ...item, // Keep all previous data (Blog Content, Meta Title, etc.)\n    servicePages: urls,\n    servicePagesCount: urls.length\n};"
+      },
+      "id": "d3d2217f-5e4c-43fa-827d-1b9d8dc8bf98",
+      "name": "Code - Fetch Service Pages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        -688
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "Your_Airtable_Base_ID",
+          "mode": "list",
+          "cachedResultName": "SEO Content Database",
+          },
+        "table": {
+          "__rl": true,
+          "value": "Your_Airtable_Table_ID",
+          "mode": "list",
+          "cachedResultName": "Keywords_Database",
+          },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Sheet_Row_ID": 0,
+            "WordPress_Post_ID": "={{ $json.id }}",
+            "WordPress_URL": "={{ $json.guid.raw }}",
+            "id": "={{ $('Airtable - Get Article Data').item.json.id }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": true
+            },
+            {
+              "id": "Primary_Keyword",
+              "displayName": "Primary_Keyword",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Brand_Name",
+              "displayName": "Brand_Name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Website_URL",
+              "displayName": "Website_URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Service_URLs",
+              "displayName": "Service_URLs",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Secondary_Keywords",
+              "displayName": "Secondary_Keywords",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "LSI_Keywords",
+              "displayName": "LSI_Keywords",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Research_Date",
+              "displayName": "Research_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "Keywords_Collected",
+                  "value": "Keywords_Collected"
+                },
+                {
+                  "name": "Content_Generated",
+                  "value": "Content_Generated"
+                },
+                {
+                  "name": "Published",
+                  "value": "Published"
+                },
+                {
+                  "name": "Rejected",
+                  "value": "Rejected"
+                }
+              ],
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Sheet_Row_ID",
+              "displayName": "Sheet_Row_ID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Meta_Title",
+              "displayName": "Meta_Title",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Meta_Description",
+              "displayName": "Meta_Description",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Blog_Content",
+              "displayName": "Blog_Content",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Image_1_URL",
+              "displayName": "Image_1_URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Generated_Date",
+              "displayName": "Generated_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "WordPress_URL",
+              "displayName": "WordPress_URL",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "WordPress_Post_ID",
+              "displayName": "WordPress_Post_ID",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Published_Date",
+              "displayName": "Published_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Rejection_Date",
+              "displayName": "Rejection_Date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "Rejection_Reason",
+              "displayName": "Rejection_Reason",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ab6e58c0-3783-4c5d-957a-a4255e6d1b1c",
+      "name": "Airtable - Mark Published",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        736,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "title": "={{ $json.Meta_Title }}",
+        "additionalFields": {
+          "content": "={{ $json.formattedContent }}",
+          "status": "publish"
+        }
+      },
+      "id": "8df8fa95-28be-4e1b-8e11-7092aadf4ec2",
+      "name": "WordPress - Create Post",
+      "type": "n8n-nodes-base.wordpress",
+      "typeVersion": 1,
+      "position": [
+        528,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "toRecipients": "user@example.com, user@example.com",
+        "subject": "={{ $json.approvalEmailSubject }}",
+        "bodyContent": "={{ $json.approvalEmailHtml }}",
+        "additionalFields": {
+          "bodyContentType": "html"
+        }
+      },
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        2192,
+        -688
+      ],
+      "id": "9a0297ec-3612-4101-965d-4b0b75120a22",
+      "name": "Send approval message",
+      "webhookId": "0de8de5a-47f1-415b-a0d8-48cdfd1f640c"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. CONFIGURATION (Exact Node Names)\nconst wordpressNodeName = 'WordPress - Create Post'; \nconst parsingNodeName = 'Code - Parse AI Response'; // The node where we generated the title\n\n// 2. GET CURRENT INPUT\nconst item = $input.first().json;\nconst fields = item.fields || item;\n\n// 3. REACH BACK LOGIC (The \"Fix\")\n\n// --- A. FIND LIVE URL (From WordPress Node) ---\nlet liveUrl = \"#\";\ntry {\n    // We go back to the WordPress node to grab the 'link' it generated\n    liveUrl = $(wordpressNodeName).first().json.link;\n} catch (e) {\n    // If that fails, check if we passed it in the current item\n    liveUrl = fields.WordPress_URL || fields.link || \"#\";\n}\n\n// --- B. FIND TITLE (From WordPress OR AI Node) ---\nlet metaTitle = \"\";\n\n// Priority 1: WordPress Node (Best because it's what is actually live)\ntry {\n    const wpData = $(wordpressNodeName).first().json;\n    // WordPress API often returns title as an object: { rendered: \"Title\" }\n    if (wpData.title && wpData.title.rendered) {\n        metaTitle = wpData.title.rendered;\n    } else if (typeof wpData.title === 'string') {\n        metaTitle = wpData.title;\n    }\n} catch (e) {}\n\n// Priority 2: AI Parse Node (Fallback if WP node didn't return it clearly)\nif (!metaTitle || metaTitle === \"Untitled Article\") {\n    try {\n        metaTitle = $(parsingNodeName).first().json.metaTitle;\n    } catch (e) {}\n}\n\n// Priority 3: Current Input (Last Resort)\nif (!metaTitle) {\n    metaTitle = fields.Meta_Title || fields.metaTitle || \"New Blog Post\";\n}\n\n\n// 4. GENERATE EMAIL\nconst publishedDate = new Date().toLocaleString(); \n\nconst emailHtml = `\n<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: #28a745; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center; }\n    .content-box { background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 8px; }\n    .btn { display: inline-block; padding: 12px 24px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; margin-top: 20px; }\n    .meta-info { background: #d4edda; color: #155724; padding: 15px; border-radius: 5px; margin: 15px 0; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>✅ Blog Published Successfully!</h1>\n  </div>\n  \n  <div class=\"content-box\">\n    <p>Great news! The following blog post has been successfully published to your WordPress site.</p>\n    \n    <div class=\"meta-info\">\n      <p><strong>Article Title:</strong> ${metaTitle}</p>\n      <p><strong>Published Date:</strong> ${publishedDate}</p>\n    </div>\n\n    <div style=\"text-align: center;\">\n      <a href=\"${liveUrl}\" class=\"btn\" target=\"_blank\">View Live Article</a>\n    </div>\n    \n    <p style=\"margin-top: 30px; font-size: 12px; color: #666;\">This status has been updated to \"Published\" in Airtable.</p>\n  </div>\n</body>\n</html>\n`;\n\n// 5. RETURN\nreturn {\n  ...item,\n  successEmailHtml: emailHtml,\n  successEmailSubject: `[PUBLISHED] Blog Live: \"${metaTitle}\"`\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        -320
+      ],
+      "id": "b411c3e8-11d7-440d-9116-8d017cae8600",
+      "name": "Code - Prepare Success Notification Email"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get row(s) in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get row(s) in sheet": {
+      "main": [
+        [
+          {
+            "node": "Set Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Variables": {
+      "main": [
+        [
+          {
+            "node": "DataForSEO - Keyword Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DataForSEO - Keyword Research": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Parse Keywords": {
+      "main": [
+        [
+          {
+            "node": "Code - Fetch Service Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Store Keywords": {
+      "main": [
+        [
+          {
+            "node": "Code - Build Gemini Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Build Gemini Prompt": {
+      "main": [
+        [
+          {
+            "node": "Generate Blog - (Meta: Llama 3.3 70B Instruct)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Parse Llama Response": {
+      "main": [
+        [
+          {
+            "node": "Generate Image - (Ghostbot Web)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Insert Images into Content": {
+      "main": [
+        [
+          {
+            "node": "Update record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update record": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare Approval Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Prepare Approval Email": {
+      "main": [
+        [
+          {
+            "node": "Send approval message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Wait for Approval": {
+      "main": [
+        [
+          {
+            "node": "IF - Check Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Check Approval": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Get Article Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Airtable - Mark Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Update Status": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare Success Notification Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Mark Rejected": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare Rejection Notice Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatting the text for Publising": {
+      "main": [
+        [
+          {
+            "node": "WordPress - Create Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Blog - (Meta: Llama 3.3 70B Instruct)1": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse Llama Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Image - (Ghostbot Web)": {
+      "main": [
+        [
+          {
+            "node": "Code - Insert Images into Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Get Article Data": {
+      "main": [
+        [
+          {
+            "node": "Formatting the text for Publising",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Prepare Rejection Notice Email": {
+      "main": [
+        [
+          {
+            "node": "Email - Rejection Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Fetch Service Pages": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Store Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Airtable - Mark Published": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Update Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WordPress - Create Post": {
+      "main": [
+        [
+          {
+            "node": "Airtable - Mark Published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Prepare Success Notification Email": {
+      "main": [
+        [
+          {
+            "node": "Email - Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "eee48f7e-ecb9-40e4-922f-7800fc88fabd",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8813ab5a83ee3a00a5eaa92cf1e38056cb49875ff9045af12b4abde07c86153d"
+  },
+  "id": "3esmO5UbWWS60IqykNNUX",
+  "tags": []
+}
